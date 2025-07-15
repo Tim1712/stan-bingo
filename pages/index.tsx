@@ -1,4 +1,3 @@
-// pages/index.tsx
 import dynamic from "next/dynamic";
 import Head from "next/head";
 
@@ -6,7 +5,7 @@ const BingoBoard = dynamic(() => import("../components/BingoBoard"), {
   ssr: false,
   loading: () => (
     <div className="min-h-screen flex items-center justify-center">
-      📦 Kaart wordt geladen…
+      📦 Kaart wordt laden…
     </div>
   ),
 });
