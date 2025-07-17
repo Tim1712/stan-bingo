@@ -1,14 +1,10 @@
+// components/BingoBoard.tsx
 "use client";
 
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 
-type Item = {
-  id: string;
-  text: string;
-  checked: boolean;
-};
-
+type Item = { id: string; text: string; checked: boolean };
 const LOCAL_KEY = "stanBingoCardIds";
 
 // Fisher–Yates shuffle
@@ -26,98 +22,93 @@ export default function BingoBoard() {
   const [cardIds, setCardIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 1) Fetch initial items & subscribe to real-time updates
+  // 1) Load, subscribe, refresh on focus/visibility
   useEffect(() => {
-    // a) Load existing data
     async function loadItems() {
       const { data, error } = await supabase.from("bingo_items").select("*");
-      if (error) {
-        console.error("Error loading items:", error);
-      } else {
-        setAllItems((data as Item[]) || []);
+      if (error) console.error("Error loading items:", error);
+      else {
+        setAllItems(data as Item[]);
         setLoading(false);
       }
     }
     loadItems();
 
-    // b) Subscribe to updates
     const channel = supabase
       .channel("bingo-sync")
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "bingo_items" },
-        (payload) => {
-          const updated = payload.new as Item;
-          setAllItems((prev) =>
-            prev.map((it) => (it.id === updated.id ? updated : it))
-          );
+        ({ new: updated }) => {
+          const u = updated as Item;
+          setAllItems((prev) => prev.map((it) => (it.id === u.id ? u : it)));
         }
-      )
-      .subscribe();
+      );
+    channel.subscribe();
+
+    const refresh = () => loadItems();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") refresh();
+    });
 
     return () => {
       supabase.removeChannel(channel);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", () => {});
     };
   }, []);
 
-  // 2) Pick or restore your 16-item card
+  // 2) Restore or generate 16 IDs
   useEffect(() => {
     if (loading || allItems.length === 0) return;
-
     const stored = localStorage.getItem(LOCAL_KEY);
-    if (stored) {
-      setCardIds(JSON.parse(stored));
-    } else {
+    if (stored) setCardIds(JSON.parse(stored));
+    else {
       const ids = shuffle(allItems.map((it) => it.id)).slice(0, 16);
       localStorage.setItem(LOCAL_KEY, JSON.stringify(ids));
       setCardIds(ids);
     }
   }, [loading, allItems]);
 
-  // 3) Toggle checked state (optimistic + rollback)
-  const toggle = async (id: string, wasChecked: boolean) => {
-    // Optimistically update UI
+  // 3) Toggle with optimistic UI
+  const toggle = async (id: string, was: boolean) => {
     setAllItems((prev) =>
-      prev.map((it) => (it.id === id ? { ...it, checked: !wasChecked } : it))
+      prev.map((it) => (it.id === id ? { ...it, checked: !was } : it))
     );
-
-    // Persist change
     const { error } = await supabase
       .from("bingo_items")
-      .update({ checked: !wasChecked })
+      .update({ checked: !was })
       .eq("id", id);
-
     if (error) {
       console.error("Update failed:", error);
-      // Roll back on error
       setAllItems((prev) =>
-        prev.map((it) => (it.id === id ? { ...it, checked: wasChecked } : it))
+        prev.map((it) => (it.id === id ? { ...it, checked: was } : it))
       );
     }
   };
 
-  // 4) Prepare the 16 cells for rendering
+  // 4) Prepare 16 cells
   const cardItems = cardIds
     .map((id) => allItems.find((it) => it.id === id))
     .filter((it): it is Item => !!it);
 
   if (loading || cardItems.length === 0) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="w-full min-h-screen flex items-center justify-center">
         📦 Kaart wordt geladen…
       </div>
     );
   }
 
   return (
-    <main className="min-h-screen p-4 max-w-md mx-auto">
-      <h1 className="text-3xl font-bold mb-6 text-center">🍻 Stan Bingo</h1>
-      <div className="grid grid-cols-4 gap-2">
+    <div className="w-full px-0">
+      <div className="grid grid-cols-4 gap-1">
         {cardItems.map((cell) => (
           <button
             key={cell.id}
             onClick={() => toggle(cell.id, cell.checked)}
-            className={`p-2 text-xs text-center rounded border transition ${
+            className={`text-[10px] leading-snug text-center p-1 rounded border transition ${
               cell.checked
                 ? "bg-green-300 line-through border-green-600"
                 : "bg-gray-100 hover:bg-blue-100 border-gray-300"
@@ -127,6 +118,6 @@ export default function BingoBoard() {
           </button>
         ))}
       </div>
-    </main>
+    </div>
   );
 }
